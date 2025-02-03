@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/gorilla/mux"
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/sirupsen/logrus"
 )
@@ -122,27 +123,41 @@ func main() {
 	logger := logrus.New()
 	logger.SetFormatter(&logrus.JSONFormatter{
 		TimestampFormat: "2006-01-02T15:04:05.000Z07:00",
-		PrettyPrint:     false, // Set to true if you want pretty-printed JSON logs
+		PrettyPrint:     false,
 	})
 
-	// Fetch the OpenAI API key from the environment.
+	// Fetch the OpenAI API key from the environment
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		logger.Fatal("OPENAI_API_KEY environment variable is not set")
 	}
 
-	// Initialize the OpenAI client.
+	// Check JWT secret
+	if os.Getenv("JWT_SECRET") == "" {
+		logger.Fatal("JWT_SECRET environment variable is not set")
+	}
+
+	// Initialize the OpenAI client
 	client := openai.NewClient(apiKey)
 	server := NewServer(logger, client)
 
-	// Register the chat handler.
-	http.HandleFunc("/api/chat", server.chatHandler)
+	// Initialize router
+	r := mux.NewRouter()
 
-	// Determine the port to listen on.
+	// Публичный endpoint для получения токена
+	r.HandleFunc("/api/init", initHandler).Methods("GET")
+
+	// Защищенные API endpoints
+	api := r.PathPrefix("/api").Subrouter()
+	api.Use(authMiddleware)
+	api.HandleFunc("/chat", server.chatHandler).Methods("POST")
+
+	// Determine the port
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
+
 	logger.Infof("Backend service is listening on port %s", port)
-	logger.Fatal(http.ListenAndServe(":"+port, nil))
+	logger.Fatal(http.ListenAndServe(":"+port, r))
 }
