@@ -14,6 +14,10 @@ import (
 // ChatRequest defines the expected JSON structure for incoming chat requests.
 type ChatRequest struct {
 	Question string `json:"question"`
+	Messages []struct {
+		Text string `json:"text"`
+		Type string `json:"type"` // "user" or "assistant"
+	} `json:"messages"`
 }
 
 // ChatResponse defines the JSON structure for responses from the backend.
@@ -92,8 +96,27 @@ func (s *Server) chatHandler(w http.ResponseWriter, r *http.Request) {
 		Model: "gpt-4o",
 		Messages: []openai.ChatCompletionMessage{
 			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: reqPayload.Question},
 		},
+	}
+
+	// Преобразуем историю сообщений из фронтенда в формат OpenAI
+	if len(reqPayload.Messages) > 0 {
+		for _, msg := range reqPayload.Messages {
+			role := "user"
+			if msg.Type == "assistant" {
+				role = "assistant"
+			}
+			chatReq.Messages = append(chatReq.Messages, openai.ChatCompletionMessage{
+				Role:    role,
+				Content: msg.Text,
+			})
+		}
+	} else {
+		// Если история пуста, используем только текущий вопрос
+		chatReq.Messages = append(chatReq.Messages, openai.ChatCompletionMessage{
+			Role:    "user",
+			Content: reqPayload.Question,
+		})
 	}
 
 	// Call the OpenAI API.
@@ -144,10 +167,10 @@ func main() {
 	// Initialize router
 	r := mux.NewRouter()
 
-	// Публичный endpoint для получения токена
+	// Public endpoint for getting a token
 	r.HandleFunc("/api/init", initHandler).Methods("GET")
 
-	// Защищенные API endpoints
+	// Protected API endpoints
 	api := r.PathPrefix("/api").Subrouter()
 	api.Use(authMiddleware)
 	api.HandleFunc("/chat", server.chatHandler).Methods("POST")
